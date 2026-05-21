@@ -18,12 +18,20 @@ const objectId = z.string().refine((value) => mongoose.Types.ObjectId.isValid(va
 
 const email = z.string().email().transform((value) => value.toLowerCase().trim());
 const imageUrl = z.string().url();
+const futureDate = z.coerce.date().refine(
+  (value) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return value >= today;
+  },
+  { message: 'Booking date cannot be in the past.' }
+);
 
 export const idParamSchema = z.object({ id: objectId });
 export const emailParamSchema = z.object({ email });
 
 export const jwtSchema = z.object({
-  email
+  idToken: z.string().trim().min(20)
 });
 
 export const userCreateSchema = z.object({
@@ -58,14 +66,14 @@ export const bookingCreateSchema = z.object({
   serviceId: objectId,
   userName: z.string().trim().min(1).max(80),
   userEmail: email,
-  bookingDate: z.coerce.date(),
+  bookingDate: futureDate,
   location: z.string().trim().min(3).max(240),
   serviceMode: z.enum(SERVICE_MODES).optional()
 });
 
 export const bookingUpdateSchema = z
   .object({
-    bookingDate: z.coerce.date().optional(),
+    bookingDate: futureDate.optional(),
     location: z.string().trim().min(3).max(240).optional(),
     serviceMode: z.enum(SERVICE_MODES).optional(),
     status: z.enum(PROJECT_STATUSES).optional(),
@@ -107,9 +115,5 @@ export const paymentIntentSchema = z.object({
 
 export const paymentCreateSchema = z.object({
   bookingId: objectId,
-  serviceId: objectId,
-  amount: z.coerce.number().min(0),
-  currency: z.string().trim().min(3).max(3).default('bdt'),
-  transactionId: z.string().trim().min(6),
-  paymentStatus: z.enum(TRANSACTION_STATUSES).default('succeeded')
+  paymentIntentId: z.string().trim().min(6)
 });

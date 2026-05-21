@@ -5,6 +5,10 @@ export const getPagination = (query) => {
   return { page, limit, skip };
 };
 
+export const normalizeSearch = (value = '') => String(value).trim().slice(0, 80);
+
+export const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 export const getSort = (sort = 'newest') => {
   const map = {
     newest: { createdAt: -1 },

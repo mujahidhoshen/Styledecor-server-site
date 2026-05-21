@@ -13,7 +13,7 @@ import { emailParamSchema, idParamSchema, userCreateSchema, userRoleSchema } fro
 
 const router = Router();
 
-router.post('/users', validate(userCreateSchema), createOrUpdateUser);
+router.post('/users', verifyJWT, validate(userCreateSchema), createOrUpdateUser);
 router.get('/users', verifyJWT, verifyAdmin, getUsers);
 router.get('/users/:email', verifyJWT, verifyUser, validate(emailParamSchema, 'params'), getUserByEmail);
 router.patch('/users/:id/role', verifyJWT, verifyAdmin, validate(idParamSchema, 'params'), validate(userRoleSchema), updateUserRole);
