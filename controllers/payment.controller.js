@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { stripe } from '../config/stripe.js';
 import { Booking } from '../models/Booking.js';
 import { Payment } from '../models/Payment.js';
@@ -37,6 +38,7 @@ export const createPaymentIntent = asyncHandler(async (req, res) => {
     metadata: {
       bookingId: booking._id.toString(),
       serviceId: booking.serviceId.toString(),
+      serviceName: booking.serviceName,
       userEmail: booking.userEmail
     }
   });
@@ -50,49 +52,105 @@ export const createPaymentIntent = asyncHandler(async (req, res) => {
 });
 
 export const createPayment = asyncHandler(async (req, res) => {
-  const booking = await Booking.findById(req.body.bookingId);
-
-  if (!booking) {
-    throw new AppError('Booking not found.', 404);
+  if (!stripe) {
+    throw new AppError('Stripe is not configured on the server.', 503);
   }
 
-  if (booking.userEmail !== req.user.email) {
-    throw new AppError('You can only store payments for your own bookings.', 403);
+  const paymentIntent = await stripe.paymentIntents.retrieve(req.body.paymentIntentId);
+
+  if (!paymentIntent) {
+    throw new AppError('Stripe payment intent was not found.', 404);
   }
 
-  if (booking.serviceId.toString() !== req.body.serviceId) {
-    throw new AppError('Payment service does not match booking service.', 400);
+  if (paymentIntent.status !== 'succeeded') {
+    throw new AppError('Payment has not succeeded yet.', 400);
   }
 
-  if (Number(req.body.amount) !== Number(booking.cost)) {
-    throw new AppError('Payment amount does not match booking cost.', 400);
+  if (paymentIntent.metadata?.bookingId !== req.body.bookingId) {
+    throw new AppError('Payment intent does not belong to this booking.', 400);
   }
 
-  const existing = await Payment.findOne({ transactionId: req.body.transactionId }).lean();
+  if (paymentIntent.metadata?.userEmail !== req.user.email) {
+    throw new AppError('Payment intent does not belong to your account.', 403);
+  }
 
-  if (existing) {
-    return res.json({
-      success: true,
-      message: 'Payment already recorded.',
-      data: existing
+  const session = await mongoose.startSession();
+  let savedPayment = null;
+  let wasCreated = false;
+
+  try {
+    await session.withTransaction(async () => {
+      const booking = await Booking.findById(req.body.bookingId).session(session);
+
+      if (!booking) {
+        throw new AppError('Booking not found.', 404);
+      }
+
+      if (booking.userEmail !== req.user.email) {
+        throw new AppError('You can only store payments for your own bookings.', 403);
+      }
+
+      if (booking.status === 'cancelled') {
+        throw new AppError('Cancelled bookings cannot be paid.', 400);
+      }
+
+      if (paymentIntent.metadata?.serviceId !== booking.serviceId.toString()) {
+        throw new AppError('Payment service does not match booking service.', 400);
+      }
+
+      if (paymentIntent.amount_received !== toStripeAmount(booking.cost)) {
+        throw new AppError('Payment amount does not match booking cost.', 400);
+      }
+
+      if (paymentIntent.currency !== 'bdt') {
+        throw new AppError('Payment currency does not match booking currency.', 400);
+      }
+
+      const existing = await Payment.findOne({
+        $or: [
+          { transactionId: paymentIntent.id },
+          { bookingId: booking._id, paymentStatus: 'succeeded' }
+        ]
+      })
+        .session(session)
+        .lean();
+
+      if (existing) {
+        booking.paymentStatus = 'paid';
+        await booking.save({ session });
+        savedPayment = existing;
+        return;
+      }
+
+      const [payment] = await Payment.create(
+        [
+          {
+            bookingId: booking._id,
+            serviceId: booking.serviceId,
+            serviceName: booking.serviceName,
+            userEmail: req.user.email,
+            amount: booking.cost,
+            currency: paymentIntent.currency,
+            transactionId: paymentIntent.id,
+            paymentStatus: 'succeeded'
+          }
+        ],
+        { session }
+      );
+
+      booking.paymentStatus = 'paid';
+      await booking.save({ session });
+      savedPayment = payment;
+      wasCreated = true;
     });
+  } finally {
+    session.endSession();
   }
 
-  const payment = await Payment.create({
-    ...req.body,
-    userEmail: req.user.email,
-    currency: req.body.currency.toLowerCase()
-  });
-
-  if (payment.paymentStatus === 'succeeded') {
-    booking.paymentStatus = 'paid';
-    await booking.save();
-  }
-
-  res.status(201).json({
+  res.status(wasCreated ? 201 : 200).json({
     success: true,
     message: 'Payment recorded.',
-    data: payment
+    data: savedPayment
   });
 });
 

@@ -14,6 +14,11 @@ const paymentSchema = new mongoose.Schema(
       ref: 'Service',
       required: true
     },
+    serviceName: {
+      type: String,
+      required: true,
+      trim: true
+    },
     userEmail: {
       type: String,
       required: true,
@@ -48,5 +53,9 @@ const paymentSchema = new mongoose.Schema(
 );
 
 paymentSchema.index({ userEmail: 1, createdAt: -1 });
+paymentSchema.index(
+  { bookingId: 1, paymentStatus: 1 },
+  { unique: true, partialFilterExpression: { paymentStatus: 'succeeded' } }
+);
 
 export const Payment = mongoose.model('Payment', paymentSchema);
