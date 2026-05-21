@@ -1,21 +1,35 @@
 import { Decorator } from '../models/Decorator.js';
 import { User } from '../models/User.js';
+import { env } from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { getPagination } from '../utils/query.js';
+import { escapeRegex, getPagination, normalizeSearch } from '../utils/query.js';
 
 export const createOrUpdateUser = asyncHandler(async (req, res) => {
+  const authenticatedEmail = req.user?.email?.toLowerCase();
+
+  if (!authenticatedEmail || authenticatedEmail !== req.body.email) {
+    throw new AppError('You can only save your own user profile.', 403);
+  }
+
   const payload = {
     name: req.body.name,
-    email: req.body.email,
+    email: authenticatedEmail,
     image: req.body.image
   };
 
   const existingUser = await User.findOne({ email: payload.email });
 
   if (existingUser) {
+    if (existingUser.status === 'disabled') {
+      throw new AppError('This account has been disabled.', 403);
+    }
+
     existingUser.name = payload.name;
     existingUser.image = payload.image;
+    if (payload.email === env.adminEmail && existingUser.role !== 'admin') {
+      existingUser.role = 'admin';
+    }
     await existingUser.save();
 
     return res.json({
@@ -27,7 +41,8 @@ export const createOrUpdateUser = asyncHandler(async (req, res) => {
 
   const user = await User.create({
     ...payload,
-    role: req.body.role === 'admin' ? 'user' : req.body.role || 'user'
+    role: payload.email === env.adminEmail ? 'admin' : 'user',
+    status: 'active'
   });
 
   res.status(201).json({
@@ -39,13 +54,15 @@ export const createOrUpdateUser = asyncHandler(async (req, res) => {
 
 export const getUsers = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
-  const { search = '', role = '', status = '' } = req.query;
+  const { role = '', status = '' } = req.query;
+  const search = normalizeSearch(req.query.search);
   const filter = {};
 
   if (search) {
+    const pattern = escapeRegex(search);
     filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } }
+      { name: { $regex: pattern, $options: 'i' } },
+      { email: { $regex: pattern, $options: 'i' } }
     ];
   }
 

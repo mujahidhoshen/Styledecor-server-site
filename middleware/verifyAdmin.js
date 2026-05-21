@@ -1,4 +1,5 @@
 import { User } from '../models/User.js';
+import { env } from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
 
 export const verifyAdmin = async (req, _res, next) => {
@@ -9,7 +10,7 @@ export const verifyAdmin = async (req, _res, next) => {
     return next(new AppError('Admin account was not found or is disabled.', 403));
   }
 
-  if (dbUser.role !== 'admin') {
+  if (dbUser.role !== 'admin' && email !== env.adminEmail) {
     return next(new AppError('Admin access is required.', 403));
   }
 

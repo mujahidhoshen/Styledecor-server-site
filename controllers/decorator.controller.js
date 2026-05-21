@@ -4,19 +4,21 @@ import { Payment } from '../models/Payment.js';
 import { User } from '../models/User.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { getPagination } from '../utils/query.js';
+import { escapeRegex, getPagination, normalizeSearch } from '../utils/query.js';
 import { calculateDecoratorEarning, isNextDecoratorStatus } from '../services/status.service.js';
 
 export const getDecorators = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
-  const { search = '', status = '' } = req.query;
+  const { status = '' } = req.query;
+  const search = normalizeSearch(req.query.search);
   const filter = {};
 
   if (search) {
+    const pattern = escapeRegex(search);
     filter.$or = [
-      { name: { $regex: search, $options: 'i' } },
-      { email: { $regex: search, $options: 'i' } },
-      { specialties: { $regex: search, $options: 'i' } }
+      { name: { $regex: pattern, $options: 'i' } },
+      { email: { $regex: pattern, $options: 'i' } },
+      { specialties: { $regex: pattern, $options: 'i' } }
     ];
   }
 

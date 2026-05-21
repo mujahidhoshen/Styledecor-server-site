@@ -1,17 +1,19 @@
 import { Service } from '../models/Service.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { getPagination, getSort } from '../utils/query.js';
+import { escapeRegex, getPagination, getSort, normalizeSearch } from '../utils/query.js';
 
 const buildServiceFilter = (query) => {
-  const { search, type, minPrice, maxPrice } = query;
+  const { type, minPrice, maxPrice } = query;
+  const search = normalizeSearch(query.search);
   const conditions = [];
 
   if (search) {
+    const pattern = escapeRegex(search);
     conditions.push({
       $or: [
-        { service_name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
+        { service_name: { $regex: pattern, $options: 'i' } },
+        { description: { $regex: pattern, $options: 'i' } }
       ]
     });
   }
@@ -24,8 +26,8 @@ const buildServiceFilter = (query) => {
 
   if (minPrice || maxPrice) {
     const cost = {};
-    if (minPrice) cost.$gte = Number(minPrice);
-    if (maxPrice) cost.$lte = Number(maxPrice);
+    if (minPrice && Number.isFinite(Number(minPrice))) cost.$gte = Number(minPrice);
+    if (maxPrice && Number.isFinite(Number(maxPrice))) cost.$lte = Number(maxPrice);
     conditions.push({ cost });
   }
 
