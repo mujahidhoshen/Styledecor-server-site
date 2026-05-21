@@ -3,18 +3,23 @@ import { Decorator } from '../models/Decorator.js';
 import { Service } from '../models/Service.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { getPagination, getSort } from '../utils/query.js';
-import { canCancelBooking } from '../services/status.service.js';
+import { escapeRegex, getPagination, getSort, normalizeSearch } from '../utils/query.js';
+import {
+  canCancelBooking,
+  assertAdminBookingStatusTransition
+} from '../services/status.service.js';
 
 const buildBookingFilter = (query) => {
-  const { search, status, paymentStatus, decoratorEmail } = query;
+  const { status, paymentStatus, decoratorEmail } = query;
+  const search = normalizeSearch(query.search);
   const filter = {};
 
   if (search) {
+    const pattern = escapeRegex(search);
     filter.$or = [
-      { serviceName: { $regex: search, $options: 'i' } },
-      { userEmail: { $regex: search, $options: 'i' } },
-      { location: { $regex: search, $options: 'i' } }
+      { serviceName: { $regex: pattern, $options: 'i' } },
+      { userEmail: { $regex: pattern, $options: 'i' } },
+      { location: { $regex: pattern, $options: 'i' } }
     ];
   }
 
@@ -23,6 +28,14 @@ const buildBookingFilter = (query) => {
   if (decoratorEmail) filter.assignedDecoratorEmail = decoratorEmail.toLowerCase();
 
   return filter;
+};
+
+const dayRange = (date) => {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start, end };
 };
 
 export const createBooking = asyncHandler(async (req, res) => {
@@ -145,6 +158,10 @@ export const updateBooking = asyncHandler(async (req, res) => {
   const allowedAdminFields = ['bookingDate', 'location', 'serviceMode', 'status'];
   const allowed = isAdmin ? allowedAdminFields : allowedUserFields;
 
+  if (isAdmin && req.body.status) {
+    assertAdminBookingStatusTransition(booking, req.body.status);
+  }
+
   for (const field of allowed) {
     if (req.body[field] !== undefined) booking[field] = req.body[field];
   }
@@ -190,6 +207,8 @@ export const updateBookingStatus = asyncHandler(async (req, res) => {
     throw new AppError('Booking not found.', 404);
   }
 
+  assertAdminBookingStatusTransition(booking, req.body.status);
+
   booking.status = req.body.status;
   await booking.save();
 
@@ -224,6 +243,31 @@ export const assignDecorator = asyncHandler(async (req, res) => {
 
   if (booking.status === 'cancelled' || booking.status === 'Completed') {
     throw new AppError('This booking cannot be assigned.', 400);
+  }
+
+  const service = await Service.findById(booking.serviceId).lean();
+
+  if (!service) {
+    throw new AppError('Booked service was not found.', 404);
+  }
+
+  const specialties = (decorator.specialties || []).map((specialty) => specialty.toLowerCase());
+  const requiredSpecialty = service.service_category.toLowerCase();
+
+  if (specialties.length && !specialties.includes(requiredSpecialty)) {
+    throw new AppError(`Decorator specialty does not match ${requiredSpecialty} services.`, 400);
+  }
+
+  const { start, end } = dayRange(booking.bookingDate);
+  const conflict = await Booking.findOne({
+    _id: { $ne: booking._id },
+    assignedDecoratorEmail: decorator.email,
+    bookingDate: { $gte: start, $lt: end },
+    status: { $nin: ['cancelled', 'Completed'] }
+  }).lean();
+
+  if (conflict) {
+    throw new AppError('Decorator already has an assigned project on this date.', 409);
   }
 
   booking.assignedDecoratorId = decorator._id;
