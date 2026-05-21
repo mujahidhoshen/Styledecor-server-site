@@ -11,7 +11,20 @@ export const verifyJWT = (req, _res, next) => {
   }
 
   try {
-    req.user = jwt.verify(token, env.jwtSecret);
+    if (!env.jwtSecret) {
+      return next(new AppError('JWT verification secret is not configured.', 503));
+    }
+
+    const decoded = jwt.verify(token, env.jwtSecret);
+
+    if (!decoded?.email) {
+      return next(new AppError('Invalid authentication token payload.', 401));
+    }
+
+    req.user = {
+      ...decoded,
+      email: decoded.email.toLowerCase()
+    };
     next();
   } catch (_error) {
     next(new AppError('Invalid or expired authentication token.', 401));
