@@ -1,12 +1,31 @@
 import { Decorator } from '../models/Decorator.js';
 import { User } from '../models/User.js';
-import { env } from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { escapeRegex, getPagination, normalizeSearch } from '../utils/query.js';
+import { ROLES } from '../utils/constants.js';
+import { isConfiguredAdminEmail, isDeprecatedAdminEmail, normalizeEmail } from '../utils/authIdentity.js';
+
+const resolveRoleForEmail = (email, existingRole) => {
+  if (isConfiguredAdminEmail(email)) return 'admin';
+  if (isDeprecatedAdminEmail(email) && existingRole === 'admin') return 'user';
+  return ROLES.includes(existingRole) ? existingRole : 'user';
+};
+
+const buildAvatar = (name, email) =>
+  `https://ui-avatars.com/api/?name=${encodeURIComponent(name || email)}&background=176b5d&color=ffffff`;
+
+const getDbName = () => User.db?.name || 'unconnected';
+
+const logProfileDebug = (event, details) => {
+  console.info(`[auth-profile] ${event}`, {
+    dbName: getDbName(),
+    ...details
+  });
+};
 
 export const createOrUpdateUser = asyncHandler(async (req, res) => {
-  const authenticatedEmail = req.user?.email?.toLowerCase();
+  const authenticatedEmail = normalizeEmail(req.user?.email);
 
   if (!authenticatedEmail || authenticatedEmail !== req.body.email) {
     throw new AppError('You can only save your own user profile.', 403);
@@ -18,36 +37,74 @@ export const createOrUpdateUser = asyncHandler(async (req, res) => {
     image: req.body.image
   };
 
-  const existingUser = await User.findOne({ email: payload.email });
-
-  if (existingUser) {
-    if (existingUser.status === 'disabled') {
-      throw new AppError('This account has been disabled.', 403);
-    }
-
-    existingUser.name = payload.name;
-    existingUser.image = payload.image;
-    if (payload.email === env.adminEmail && existingUser.role !== 'admin') {
-      existingUser.role = 'admin';
-    }
-    await existingUser.save();
-
-    return res.json({
-      success: true,
-      message: 'User profile updated.',
-      data: existingUser
-    });
-  }
-
-  const user = await User.create({
-    ...payload,
-    role: payload.email === env.adminEmail ? 'admin' : 'user',
-    status: 'active'
+  const isAdminEmail = isConfiguredAdminEmail(payload.email);
+  logProfileDebug('sync requested', {
+    endpoint: 'POST /users',
+    email: payload.email,
+    hasJwt: Boolean(req.headers.authorization?.startsWith('Bearer '))
   });
 
-  res.status(201).json({
+  const update = {
+    $set: {
+      name: payload.name,
+      image: payload.image
+    },
+    $setOnInsert: {
+      role: isAdminEmail ? 'admin' : 'user',
+      status: 'active'
+    }
+  };
+
+  if (isAdminEmail) {
+    update.$set.role = 'admin';
+    update.$set.status = 'active';
+  }
+
+  const result = await User.findOneAndUpdate(
+    { email: payload.email },
+    update,
+    {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true,
+      includeResultMetadata: true
+    }
+  );
+
+  const user = result.value;
+  const created = !result.lastErrorObject?.updatedExisting;
+
+  if (!user) {
+    throw new AppError('Unable to save user profile.', 500);
+  }
+
+  const resolvedRole = resolveRoleForEmail(payload.email, user.role);
+
+  if (user.role !== resolvedRole) {
+    user.role = resolvedRole;
+    await user.save();
+  }
+
+  if (!isAdminEmail && user.status === 'disabled') {
+    logProfileDebug('sync rejected disabled user', {
+      endpoint: 'POST /users',
+      email: payload.email,
+      role: user.role
+    });
+    throw new AppError('This account has been disabled.', 403);
+  }
+
+  logProfileDebug('sync completed', {
+    endpoint: 'POST /users',
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    created
+  });
+
+  res.status(created ? 201 : 200).json({
     success: true,
-    message: 'User profile created.',
+    message: created ? 'User profile created.' : 'User profile updated.',
     data: user
   });
 });
@@ -87,22 +144,65 @@ export const getUsers = asyncHandler(async (req, res) => {
 });
 
 export const getUserByEmail = asyncHandler(async (req, res) => {
-  const targetEmail = req.params.email.toLowerCase();
-  const requester = req.dbUser;
+  const targetEmail = normalizeEmail(req.params.email);
+  const requesterEmail = normalizeEmail(req.user?.email);
+  logProfileDebug('fetch requested', {
+    endpoint: 'GET /users/:email',
+    targetEmail,
+    requesterEmail,
+    hasJwt: Boolean(req.headers.authorization?.startsWith('Bearer '))
+  });
 
-  if (requester.email !== targetEmail && requester.role !== 'admin') {
-    throw new AppError('You can only view your own profile.', 403);
+  if (requesterEmail !== targetEmail) {
+    const requester = await User.findOne({ email: requesterEmail }).lean();
+    const requesterIsAdmin = requester?.role === 'admin' || isConfiguredAdminEmail(requesterEmail);
+    if (!requester || requester.status === 'disabled' || !requesterIsAdmin) {
+      throw new AppError('You can only view your own profile.', 403);
+    }
   }
 
-  const user = await User.findOne({ email: targetEmail }).lean();
+  let user = await User.findOne({ email: targetEmail });
 
   if (!user) {
-    throw new AppError('User not found.', 404);
+    if (requesterEmail !== targetEmail) {
+      throw new AppError('User not found.', 404);
+    }
+
+    const name = targetEmail.split('@')[0];
+    const image = buildAvatar(name, targetEmail);
+    user = await User.create({
+      name,
+      email: targetEmail,
+      image,
+      role: resolveRoleForEmail(targetEmail),
+      status: 'active'
+    });
+  } else {
+    const resolvedRole = resolveRoleForEmail(targetEmail, user.role);
+
+    if (user.role !== resolvedRole) {
+      user.role = resolvedRole;
+    }
+
+    if (isConfiguredAdminEmail(targetEmail) && user.status !== 'active') {
+      user.status = 'active';
+    }
+
+    if (user.isModified()) {
+      await user.save();
+    }
   }
 
   res.json({
     success: true,
-    data: user
+    data: user.toObject ? user.toObject() : user
+  });
+
+  logProfileDebug('fetch completed', {
+    endpoint: 'GET /users/:email',
+    targetEmail,
+    role: user.role,
+    status: user.status
   });
 });
 
@@ -113,7 +213,15 @@ export const updateUserRole = asyncHandler(async (req, res) => {
     throw new AppError('User not found.', 404);
   }
 
-  user.role = req.body.role;
+  if (isConfiguredAdminEmail(user.email) && req.body.role !== 'admin') {
+    throw new AppError('The configured admin email must keep the admin role.', 400);
+  }
+
+  if (isDeprecatedAdminEmail(user.email) && req.body.role === 'admin') {
+    throw new AppError('This email is not configured for admin access.', 400);
+  }
+
+  user.role = resolveRoleForEmail(user.email, req.body.role);
   if (req.body.status) user.status = req.body.status;
   await user.save();
 

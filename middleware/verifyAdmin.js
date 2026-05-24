@@ -1,6 +1,6 @@
 import { User } from '../models/User.js';
-import { env } from '../config/env.js';
 import { AppError } from '../utils/AppError.js';
+import { isConfiguredAdminEmail, isDeprecatedAdminEmail } from '../utils/authIdentity.js';
 
 export const verifyAdmin = async (req, _res, next) => {
   const email = req.user?.email?.toLowerCase();
@@ -10,7 +10,11 @@ export const verifyAdmin = async (req, _res, next) => {
     return next(new AppError('Admin account was not found or is disabled.', 403));
   }
 
-  if (dbUser.role !== 'admin' && email !== env.adminEmail) {
+  if (isDeprecatedAdminEmail(email)) {
+    return next(new AppError('This email is not configured for admin access.', 403));
+  }
+
+  if (dbUser.role !== 'admin' && !isConfiguredAdminEmail(email)) {
     return next(new AppError('Admin access is required.', 403));
   }
 

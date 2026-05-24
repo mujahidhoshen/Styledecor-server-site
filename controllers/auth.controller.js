@@ -10,9 +10,15 @@ export const createJwt = asyncHandler(async (req, res) => {
   }
 
   const firebaseUser = await verifyFirebaseIdToken(req.body.idToken);
+  const email = firebaseUser.email?.toLowerCase().trim();
+
+  if (!email) {
+    throw new AppError('Verified Firebase user does not include an email address.', 401);
+  }
+
   const token = jwt.sign(
     {
-      email: firebaseUser.email,
+      email,
       uid: firebaseUser.uid
     },
     env.jwtSecret,
@@ -23,7 +29,7 @@ export const createJwt = asyncHandler(async (req, res) => {
     success: true,
     token,
     user: {
-      email: firebaseUser.email,
+      email,
       uid: firebaseUser.uid,
       emailVerified: firebaseUser.emailVerified
     }
