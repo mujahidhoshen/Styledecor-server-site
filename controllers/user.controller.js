@@ -44,20 +44,24 @@ export const createOrUpdateUser = asyncHandler(async (req, res) => {
     hasJwt: Boolean(req.headers.authorization?.startsWith('Bearer '))
   });
 
+  // 1. Start with just name and image in $set
   const update = {
     $set: {
       name: payload.name,
       image: payload.image
     },
-    $setOnInsert: {
-      role: isAdminEmail ? 'admin' : 'user',
-      status: 'active'
-    }
+    $setOnInsert: {} 
   };
 
+  // 2. Conditionally assign role and status to ONLY ONE operator
   if (isAdminEmail) {
+    // If admin, we force the update via $set
     update.$set.role = 'admin';
     update.$set.status = 'active';
+  } else {
+    // If regular user, we only set these defaults if it's a brand new account
+    update.$setOnInsert.role = 'user';
+    update.$setOnInsert.status = 'active';
   }
 
   const result = await User.findOneAndUpdate(
