@@ -2,6 +2,8 @@ import admin from 'firebase-admin';
 import { env } from './env.js';
 import { AppError } from '../utils/AppError.js';
 
+let firebaseApp = null;
+
 const parseServiceAccount = () => {
   if (env.firebase.serviceAccountBase64) {
     const decoded = Buffer.from(env.firebase.serviceAccountBase64, 'base64').toString('utf8');
@@ -39,15 +41,27 @@ const initializeFirebaseAdmin = () => {
   return null;
 };
 
-const firebaseApp = initializeFirebaseAdmin();
+const getFirebaseApp = () => {
+  if (firebaseApp) return firebaseApp;
+
+  try {
+    firebaseApp = initializeFirebaseAdmin();
+    return firebaseApp;
+  } catch (error) {
+    console.error('[firebase-admin] Initialization failed:', error.message);
+    throw new AppError('Firebase Admin authentication is not configured correctly on the server.', 503);
+  }
+};
 
 export const verifyFirebaseIdToken = async (idToken) => {
-  if (!firebaseApp) {
+  const app = getFirebaseApp();
+
+  if (!app) {
     throw new AppError('Firebase Admin authentication is not configured on the server.', 503);
   }
 
   try {
-    const decoded = await admin.auth(firebaseApp).verifyIdToken(idToken);
+    const decoded = await admin.auth(app).verifyIdToken(idToken);
 
     if (!decoded.email) {
       throw new AppError('Firebase token does not include an email address.', 401);

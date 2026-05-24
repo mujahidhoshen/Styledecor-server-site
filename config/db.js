@@ -13,6 +13,8 @@ export const connectDB = async () => {
     throw new Error('MONGODB_URI is required to connect to MongoDB.');
   }
 
+  console.info(`[db] Using MongoDB database: ${env.databaseName}`);
+
   mongoose.set('strictQuery', true);
   connectionPromise =
     connectionPromise ||

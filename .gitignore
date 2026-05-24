@@ -1,3 +1,6 @@
 node_modules
 .env
+.env.local
 .DS_Store
+
+styledecor-45a4c-firebase-adminsdk-fbsvc-9a8bdb0cce.json

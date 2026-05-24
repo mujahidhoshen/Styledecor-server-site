@@ -14,7 +14,7 @@ StyleDecor is a MERN booking platform for home, office, wedding, seminar, and ce
 
 - Firebase-authenticated JWT issuing flow.
 - Role-protected APIs for users, admins, and decorators.
-- Dedicated MongoDB database name: `styleBD`.
+- Dedicated MongoDB database name: `styleDB`.
 - Service CRUD, booking management, cancellation, and workflow updates.
 - Decorator approval, assignment, schedule, project status, earnings, and payments.
 - Stripe PaymentIntent creation and server-side payment verification.
@@ -43,12 +43,12 @@ The API runs on `http://localhost:5001` by default.
 ```env
 PORT=5001
 MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/styledecor
-MONGODB_DB_NAME=styleBD
+MONGODB_DB_NAME=styleDB
 JWT_SECRET=replace-with-a-long-random-secret
 STRIPE_SECRET_KEY=sk_test_replace_me
 CLIENT_URL=http://localhost:5173
 CLIENT_URLS=http://localhost:5173,https://your-client.vercel.app
-ADMIN_EMAIL=dbadmin6432@gmail.com
+ADMIN_EMAIL=mh5787975@gmail.com
 FIREBASE_PROJECT_ID=replace_me
 FIREBASE_CLIENT_EMAIL=firebase-adminsdk-xxxxx@replace_me.iam.gserviceaccount.com
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nreplace_me\n-----END PRIVATE KEY-----\n"
@@ -74,7 +74,7 @@ All endpoints are available at root and with `/api` prefix.
 
 ## Admin Setup
 
-The assignment admin email is `dbadmin6432@gmail.com`. Set `ADMIN_EMAIL` to that value in Vercel and local `.env`. When that Firebase user logs in, the backend profile sync assigns or upgrades the user document to the `admin` role.
+The assignment admin email is `mh5787975@gmail.com`. Set `ADMIN_EMAIL` to that value in Vercel and local `.env`. When that Firebase user logs in, the backend profile sync assigns or upgrades the user document to the `admin` role.
 
 ## Deployment Notes
 
@@ -82,6 +82,6 @@ The assignment admin email is `dbadmin6432@gmail.com`. Set `ADMIN_EMAIL` to that
 - Set all server environment variables in Vercel.
 - Set `CLIENT_URL` to the exact deployed client origin.
 - Add any local or preview origins to `CLIENT_URLS`; CORS no longer allows arbitrary preview domains.
-- Use MongoDB Atlas and verify collections are created inside the `styleBD` database.
+- Use MongoDB Atlas and verify collections are created inside the `styleDB` database.
 - Keep `.env` out of version control.
 - The server returns `503` for temporary DB connection failure instead of hanging until a 504.
